@@ -1,0 +1,43 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Leeta Attendance</title>
+<style>
+:root{--bg:#0a1224;--card:#111b33;--line:#1e2c4d;--tx:#e8eefc;--mu:#8a9ac0;--ac:#3b82f6;--ok:#34d399;--bad:#f87171}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px system-ui,sans-serif;padding:20px;max-width:1000px;margin-inline:auto}
+h1{margin:0}small,.mu{color:var(--mu)}.top{display:flex;justify-content:space-between;align-items:end;margin-bottom:18px}
+.g{display:grid;gap:12px}.s{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.two{grid-template-columns:1.4fr 1fr;margin-top:12px}
+@media(max-width:700px){.two{grid-template-columns:1fr}}
+.c{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.n{font-size:30px;font-weight:700}.on{color:var(--ok)}.off{color:var(--bad)}
+.row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}
+.bars{display:flex;align-items:end;gap:3px;height:110px}.bars i{flex:1;background:var(--ac);border-radius:3px 3px 0 0;min-height:2px}
+input,button{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--tx)}
+button{background:var(--ac);border:0;cursor:pointer}input{width:100%;margin-bottom:6px}:focus-visible{outline:2px solid var(--ac)}
+.x{background:none;color:var(--bad);padding:0 6px}
+</style></head><body>
+<div class="top"><div><h1>Leeta</h1><small>Attendance system</small></div><small id="clock"></small></div>
+<div class="g s">
+<div class="c"><div class="n" id="present">0</div><span class="mu">Present today</span></div>
+<div class="c"><div class="n" id="users">0</div><span class="mu">Registered users</span></div>
+<div class="c"><div class="n" id="scans">0</div><span class="mu">Scans today</span></div>
+<div class="c"><div class="n" id="dev">-</div><span class="mu">ESP32 status</span></div></div>
+<div class="g two"><div class="c"><b>Live feed</b><div id="feed"><p class="mu">No scans yet. Tap a card on the reader.</p></div></div>
+<div class="c"><b>Scans per hour</b><div class="bars" id="bars"></div></div></div>
+<div class="c" style="margin-top:12px"><b>Users and cards</b><div id="ulist"></div>
+<p class="mu">Add a user: scan their card, copy the UID from the live feed, then save it here.</p>
+<input id="uid" placeholder="Card UID"><input id="name" placeholder="Full name"><button onclick="add()">Save user</button></div>
+<script>
+const $=id=>document.getElementById(id);
+async function load(){
+ const s=await (await fetch('/api/stats')).json();
+ $('present').textContent=s.present;$('users').textContent=s.users;$('scans').textContent=s.scans;
+ $('dev').textContent=s.online?'Online':'Offline';$('dev').className='n '+(s.online?'on':'off');
+ if(s.feed.length)$('feed').innerHTML=s.feed.map(f=>`<div class="row"><span>${f.name||'<span class="off">Unknown</span> '+f.uid}</span><span class="mu">${f.ts.slice(11)}</span></div>`).join('');
+ const m=Math.max(1,...s.hourly);$('bars').innerHTML=s.hourly.map((v,h)=>`<i title="${h}:00 - ${v}" style="height:${v/m*100}%"></i>`).join('');
+ const u=await (await fetch('/api/users')).json();
+ $('ulist').innerHTML=u.map(x=>`<div class="row"><span>${x.name} <small>${x.uid}</small></span><button class="x" onclick="del('${x.uid}')">Remove</button></div>`).join('');
+ $('clock').textContent=new Date().toLocaleString();
+}
+async function add(){await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid:$('uid').value,name:$('name').value})});$('uid').value=$('name').value='';load()}
+async function del(u){await fetch('/api/users/'+u,{method:'DELETE'});load()}
+load();setInterval(load,3000);
+</script></body></html>
