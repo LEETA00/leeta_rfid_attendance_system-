@@ -1,0 +1,70 @@
+"""Leeta attendance server: Flask + SQLite. Run: python app.py"""
+import os, sqlite3, time
+from flask import Flask, request, jsonify, render_template, abort
+
+API_KEY = os.environ.get("LEETA_API_KEY", "change-me")
+DB = os.path.join(os.path.dirname(__file__), "leeta.db")
+app = Flask(__name__)
+last_beat = 0.0
+
+def db():
+    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row; return c
+
+with db() as c:
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS users(uid TEXT PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS scans(id INTEGER PRIMARY KEY, uid TEXT, name TEXT,
+        ts TEXT DEFAULT (datetime('now','localtime')));""")
+
+def need_key():
+    if request.headers.get("X-API-Key") != API_KEY: abort(401)
+
+@app.get("/")
+def index(): return render_template("index.html")
+
+@app.post("/api/heartbeat")
+def heartbeat():
+    global last_beat; need_key(); last_beat = time.time(); return jsonify(ok=True)
+
+@app.post("/api/scan")
+def scan():
+    global last_beat; need_key(); last_beat = time.time()
+    uid = (request.get_json(force=True).get("uid") or "").upper()
+    with db() as c:
+        u = c.execute("SELECT name FROM users WHERE uid=?", (uid,)).fetchone()
+        c.execute("INSERT INTO scans(uid,name) VALUES(?,?)", (uid, u["name"] if u else None))
+    return jsonify(known=bool(u), name=u["name"] if u else None)
+
+@app.get("/api/stats")
+def stats():
+    with db() as c:
+        today = "date(ts)=date('now','localtime')"
+        present = c.execute(f"SELECT COUNT(DISTINCT uid) FROM scans WHERE {today} AND name IS NOT NULL").fetchone()[0]
+        users = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        scans = c.execute(f"SELECT COUNT(*) FROM scans WHERE {today}").fetchone()[0]
+        hours = {r[0]: r[1] for r in c.execute(
+            f"SELECT strftime('%H',ts), COUNT(*) FROM scans WHERE {today} GROUP BY 1")}
+        feed = [dict(r) for r in c.execute("SELECT uid,name,ts FROM scans ORDER BY id DESC LIMIT 15")]
+    return jsonify(present=present, users=users, scans=scans, feed=feed,
+                   hourly=[hours.get(f"{h:02d}", 0) for h in range(24)],
+                   online=time.time() - last_beat < 60)
+
+@app.get("/api/users")
+def users():
+    with db() as c: return jsonify([dict(r) for r in c.execute("SELECT * FROM users ORDER BY name")])
+
+@app.post("/api/users")
+def add_user():
+    d = request.get_json(force=True)
+    uid, name = (d.get("uid") or "").strip().upper(), (d.get("name") or "").strip()
+    if not uid or not name: abort(400)
+    with db() as c: c.execute("INSERT OR REPLACE INTO users VALUES(?,?)", (uid, name))
+    return jsonify(ok=True)
+
+@app.delete("/api/users/<uid>")
+def del_user(uid):
+    with db() as c: c.execute("DELETE FROM users WHERE uid=?", (uid.upper(),))
+    return jsonify(ok=True)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
